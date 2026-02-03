@@ -13,29 +13,30 @@ const { generateOrderToken } = require("./utils/orderToken");
 // ================= APP & SERVER =================
 
 const app = express();
+app.set("trust proxy", 1);
 const server = http.createServer(app);
 
 // ================= CONFIG =================
 
 const PORT = process.env.PORT || 5000;
 
-const ALLOWED_ORIGINS = [
-  "http://localhost:3000",
-  "http://localhost:55923",
-  "http://127.0.0.1:55923",
-];
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",")
+  : ["*"];
 
 const DB_URI = process.env.MONGODB_URI;
 
 if (!DB_URI) {
-  throw new Error("MONGODB_URI is not defined in .env");
+  console.warn(
+    "Warning: MONGODB_URI is not defined. Database features will not work.",
+  );
 }
 
 // ================= SOCKET.IO =================
 
 const io = new Server(server, {
   cors: {
-    origin: ALLOWED_ORIGINS,
+    origin: "*",
     methods: ["GET", "POST", "PUT", "PATCH"],
   },
 });
@@ -46,9 +47,9 @@ app.use(compression());
 
 app.use(
   cors({
-    origin: ALLOWED_ORIGINS,
+    origin: "*",
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json());
@@ -74,15 +75,17 @@ app.use(
     maxAge: "7d",
     etag: true,
     immutable: true,
-  })
+  }),
 );
 
 // ================= DATABASE =================
 
-mongoose
-  .connect(DB_URI)
-  .then(() => console.log("Connected to MongoDB Atlas"))
-  .catch((err) => console.error("MongoDB Connection Error:", err));
+if (DB_URI) {
+  mongoose
+    .connect(DB_URI)
+    .then(() => console.log("Connected to MongoDB Atlas"))
+    .catch((err) => console.error("MongoDB Connection Error:", err));
+}
 
 // ================= SOCKET LOGIC =================
 
@@ -91,12 +94,24 @@ const tableLocks = {};
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
+  /* ================= JOIN TABLE ================= */
+  socket.on("joinTable", (tableNumber) => {
+    socket.join(`table-${tableNumber}`);
+    console.log(`Socket ${socket.id} joined table-${tableNumber}`);
+  });
+
+  socket.on("leaveTable", (tableNumber) => {
+    socket.leave(`table-${tableNumber}`);
+    console.log(`Socket ${socket.id} left table-${tableNumber}`);
+  });
+
+  /* ================= TABLE LOCK ================= */
   socket.on("tryAccessTable", ({ tableId, clientId }) => {
     const lock = tableLocks[tableId];
 
     if (lock && lock.clientId !== clientId) {
-      const isExpired = Date.now() - lock.lastSeen > 10000;
-      if (!isExpired) {
+      const expired = Date.now() - lock.lastSeen > 10000;
+      if (!expired) {
         return socket.emit("accessDenied", {
           message: "Meja sedang digunakan",
         });
@@ -113,17 +128,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("heartbeat", ({ tableId, clientId }) => {
-    if (
-      tableLocks[tableId] &&
-      tableLocks[tableId].clientId === clientId
-    ) {
+    if (tableLocks[tableId]?.clientId === clientId) {
       tableLocks[tableId].lastSeen = Date.now();
     }
-  });
-
-  socket.on("leaveTable", (tableId) => {
-    delete tableLocks[tableId];
-    console.log(`Table ${tableId} is now free`);
   });
 
   socket.on("disconnect", () => {
@@ -140,6 +147,6 @@ app.get("/test-token/:table", (req, res) => {
 
 // ================= SERVER START =================
 
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
