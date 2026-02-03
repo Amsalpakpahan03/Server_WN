@@ -16,31 +16,19 @@ const { upload, compressMenuImage } = require("../middlewares/uploadMenuImage");
 module.exports = (io) => {
   /* ================= MENU ================= */
 
-  router.get(
-    "/menu",
-    publicLimiter,
-    menuController.getAllMenu
-  );
+  router.get("/menu", publicLimiter, menuController.getAllMenu);
 
   router.post(
     "/menu",
     uploadLimiter,
     upload.single("image"),
     compressMenuImage,
-    menuController.createMenu
+    menuController.createMenu,
   );
 
-  router.put(
-    "/menu/:id",
-    publicLimiter,
-    menuController.updateMenu
-  );
+  router.put("/menu/:id", publicLimiter, menuController.updateMenu);
 
-  router.delete(
-    "/menu/:id",
-    publicLimiter,
-    menuController.deleteMenu
-  );
+  router.delete("/menu/:id", publicLimiter, menuController.deleteMenu);
 
   /* ================= ORDERS ================= */
 
@@ -49,26 +37,18 @@ module.exports = (io) => {
     "/orders",
     orderLimiter,
     validateOrderToken,
-    orderController.createOrder(io)
+    orderController.createOrder(io),
   );
 
   // 🔒 GET ORDERS (ADMIN / DASHBOARD)
-  router.get(
-    "/orders",
-    publicLimiter,
-    orderController.getAllOrders
-  );
+  router.get("/orders", publicLimiter, orderController.getAllOrders);
 
-  router.get(
-    "/orders/:id",
-    publicLimiter,
-    orderController.getOrderById
-  );
+  router.get("/orders/:id", publicLimiter, orderController.getOrderById);
 
   router.put(
     "/orders/:id/status",
     publicLimiter,
-    orderController.updateStatus(io)
+    orderController.updateStatus(io),
   );
 
   return router;
