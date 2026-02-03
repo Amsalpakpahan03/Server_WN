@@ -1,19 +1,23 @@
 const Menu = require("../models/Menu");
 
+const BASE_URL = process.env.BASE_URL;
+
 exports.getAllMenu = async () => {
   return await Menu.find();
 };
 
-exports.createMenu = async ({ name, price, category, description }, compressedImage) => {
+exports.createMenu = async (payload, compressedImage) => {
+  const { name, price, category, description } = payload;
+
   const imageUrl = compressedImage
-    ? `http://localhost:5000/uploads/${compressedImage}`
+    ? `${process.env.BASE_URL || ""}/uploads/${compressedImage}`
     : "";
 
   const newMenu = new Menu({
     name,
-    price,
+    price: Number(price),
     category,
-    description,
+    description: description || "",
     image_url: imageUrl,
   });
 
@@ -21,11 +25,7 @@ exports.createMenu = async ({ name, price, category, description }, compressedIm
 };
 
 exports.updateMenu = async (id, payload) => {
-  return await Menu.findByIdAndUpdate(
-    id,
-    { $set: payload },
-    { new: true }
-  );
+  return await Menu.findByIdAndUpdate(id, { $set: payload }, { new: true });
 };
 
 exports.deleteMenu = async (id) => {
