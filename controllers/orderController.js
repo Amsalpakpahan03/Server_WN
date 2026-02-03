@@ -7,10 +7,32 @@ const orderService = require("../services/OrderService");
 const getTableFromReq = (req) => req.tableNumber;
 
 // ================= CREATE ORDER =================
+// exports.createOrder = (io) => async (req, res) => {
+//   try {
+//     const tableNumber = getTableFromReq(req);
+
+//     const savedOrder = await orderService.createOrder({
+//       tableNumber,
+//       items: req.body.items,
+//       totalPrice: req.body.totalPrice,
+//     });
+
+//     io.emit("newOrder", savedOrder);
+
+//     res.status(201).json(savedOrder);
+//   } catch (err) {
+//     if (err.message === "TABLE_INVALID") {
+//       return res.status(400).json({ message: "Table tidak valid" });
+//     }
+
+//     res.status(500).json({ message: "Gagal membuat order", error: err });
+//   }
+// };
+// controllers/OrderController.js
+
 exports.createOrder = (io) => async (req, res) => {
   try {
     const tableNumber = getTableFromReq(req);
-
     const savedOrder = await orderService.createOrder({
       tableNumber,
       items: req.body.items,
@@ -18,14 +40,21 @@ exports.createOrder = (io) => async (req, res) => {
     });
 
     io.emit("newOrder", savedOrder);
-
     res.status(201).json(savedOrder);
   } catch (err) {
     if (err.message === "TABLE_INVALID") {
       return res.status(400).json({ message: "Table tidak valid" });
     }
+    // Tambahkan pesan ini
+    if (err.message === "TABLE_OCCUPIED") {
+      return res
+        .status(429)
+        .json({ message: "Terlalu banyak order dalam waktu singkat." });
+    }
 
-    res.status(500).json({ message: "Gagal membuat order", error: err });
+    res
+      .status(500)
+      .json({ message: "Gagal membuat order", error: err.message });
   }
 };
 
@@ -59,7 +88,7 @@ exports.updateStatus = (io) => async (req, res) => {
   try {
     const order = await orderService.updateStatus(
       req.params.id,
-      req.body.status
+      req.body.status,
     );
 
     if (!order) {
