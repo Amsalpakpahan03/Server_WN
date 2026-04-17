@@ -40,3 +40,38 @@ exports.updateStatus = async (id, status) => {
     { new: true }
   );
 };
+
+// Tambahkan ini di services/OrderService.js
+exports.updateCategoryStatus = async (orderId, category, status) => {
+  if (category === "ALL") {
+    return await Order.findByIdAndUpdate(
+      orderId,
+      { status: status },
+      { new: true }
+    );
+  }
+
+  // Update status hanya untuk items yang memiliki kategori yang sesuai
+  const updatedOrder = await Order.findOneAndUpdate(
+    { _id: orderId },
+    { $set: { "items.$[elem].status": status } },
+    {
+      arrayFilters: [{ "elem.category": category }],
+      new: true,
+    }
+  );
+
+  // Logika Otomatis: Jika semua item sudah 'served', status pesanan utama jadi 'served'
+  if (updatedOrder && updatedOrder.items.length > 0) {
+    const allItemsServed = updatedOrder.items.every(
+      (item) => item.status === "served"
+    );
+    if (allItemsServed && updatedOrder.status !== "paid") {
+      updatedOrder.status = "served";
+      await updatedOrder.save();
+    }
+  }
+
+  return updatedOrder;
+};
+

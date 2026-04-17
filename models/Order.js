@@ -2,18 +2,45 @@ const mongoose = require("mongoose");
 
 const OrderSchema = new mongoose.Schema(
   {
-    tableNumber: { type: String, required: true },
+    tableNumber: {
+      type: String,
+      required: true,
+    },
 
     items: [
       {
-        name: String,
-        quantity: Number,
-        price: Number,
+        name: {
+          type: String,
+          required: true,
+        },
+        quantity: {
+          type: Number,
+          required: true,
+          min: 1,
+        },
+        price: {
+          type: Number,
+          required: true,
+        },
+        category: {
+          type: String,
+          enum: ["Makanan", "Minuman", "Cemilan", "Paket"],
+          required: true,
+        },
+        status: {
+          type: String,
+          enum: ["pending", "cooking", "served"],
+          default: "pending",
+        },
       },
     ],
 
-    totalPrice: { type: Number, default: 0 },
+    totalPrice: {
+      type: Number,
+      default: 0,
+    },
 
+    // Status global order (untuk keseluruhan pesanan)
     status: {
       type: String,
       enum: ["pending", "cooking", "served", "paid"],
@@ -21,13 +48,12 @@ const OrderSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true // createdAt & updatedAt otomatis
-  }
+    timestamps: true,
+  },
 );
 
-/**
- * Index untuk FCFS queue
- */
+// Index untuk optimasi query
 OrderSchema.index({ createdAt: 1, _id: 1 });
+OrderSchema.index({ tableNumber: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Order", OrderSchema);
