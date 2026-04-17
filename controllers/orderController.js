@@ -1,4 +1,5 @@
 const Order = require("../models/Order");
+const orderService = require("../services/OrderService"); // TAMBAHKAN INI
 
 const getTableFromReq = (req) => req.tableNumber;
 
@@ -7,29 +8,22 @@ exports.createOrder = (io) => async (req, res) => {
   try {
     const tableNumber = getTableFromReq(req);
 
-    const newOrder = new Order({
+    const savedOrder = await orderService.createOrder({
       tableNumber,
       items: req.body.items,
       totalPrice: req.body.totalPrice,
     });
 
-    const savedOrder = await newOrder.save();
-
     // Emit event ke semua client yang terhubung
     io.emit("newOrder", savedOrder);
 
-    res.status(201).json({
-      success: true,
-      message: "Pesanan berhasil dibuat",
-      data: savedOrder,
-    });
+    res.status(201).json(savedOrder);
   } catch (err) {
-    console.error("Error createOrder:", err);
-    res.status(500).json({
-      success: false,
-      message: "Gagal membuat order",
-      error: err.message,
-    });
+    if (err.message === "TABLE_INVALID") {
+      return res.status(400).json({ message: "Table tidak valid" });
+    }
+
+    res.status(500).json({ message: "Gagal membuat order", error: err });
   }
 };
 
@@ -80,22 +74,9 @@ exports.getOrderById = async (req, res) => {
 // ================= UPDATE STATUS GLOBAL =================
 exports.updateStatus = (io) => async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    // Validasi status
-    const validStatus = ["pending", "cooking", "served", "paid"];
-    if (!validStatus.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Status tidak valid",
-      });
-    }
-
-    const order = await Order.findByIdAndUpdate(
-      id,
-      { status: status },
-      { new: true, runValidators: true },
+    const order = await orderService.updateStatus(
+      req.params.id,
+      req.body.status
     );
 
     if (!order) {
