@@ -8,7 +8,7 @@ router.get("/table/:tableNumber", (req, res) => {
   const token = generateOrderToken(tableNumber);
 
   res.redirect(
-    `https://client-iota-ten-83.vercel.app//order?table=${tableNumber}&token=${token}`,
+    `http://localhost:3000/order?table=${tableNumber}&token=${token}`
   );
 });
 

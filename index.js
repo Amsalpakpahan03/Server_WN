@@ -8,192 +8,126 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const compression = require("compression");
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
-
-// Import Utils & Models
 const { generateOrderToken } = require("./utils/orderToken");
-const Admin = require("./models/Admin");
 
-// ================= APP & SERVER CONFIG =================
+// ================= APP & SERVER =================
 
 const app = express();
+app.set("trust proxy", 1);
 const server = http.createServer(app);
+
+// ================= CONFIG =================
+
 const PORT = process.env.PORT || 5000;
 
-// Validasi Env
-if (!process.env.MONGODB_URI) throw new Error("MONGODB_URI is missing in .env");
-if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is missing in .env");
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",")
+  : ["*"];
 
-const ALLOWED_ORIGINS = [
-  "http://localhost:3000",
-  "http://localhost:55923",
-  "http://127.0.0.1:55923",
-  "https://d4aa1b22-168c-44e1-a9a4-b990fed0bf50-00-2u5l4uo2l2hlm.sisko.replit.dev",
-];
+const DB_URI = process.env.MONGODB_URI;
 
-// ================= GLOBAL MIDDLEWARE =================
+if (!DB_URI) {
+  console.warn(
+    "Warning: MONGODB_URI is not defined. Database features will not work.",
+  );
+}
 
-app.use(compression());
-app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// ================= SOCKET.IO SETUP =================
+// ================= SOCKET.IO =================
 
 const io = new Server(server, {
   cors: {
-    origin: ALLOWED_ORIGINS,
+    origin: "*",
     methods: ["GET", "POST", "PUT", "PATCH"],
   },
 });
 
-// ================= AUTH ROUTES =================
+// ================= GLOBAL MIDDLEWARE =================
 
-// Endpoint untuk mendaftarkan Admin baru
-app.post("/api/register", async (req, res) => {
-  const { username, password, secretCode } = req.body;
+app.use(compression());
 
-  try {
-    // KEAMANAN: Gunakan kode rahasia agar tidak sembarang orang bisa register via Postman
-    // Anda bisa mengganti "NDESO2026" dengan kode pilihan Anda
-    if (secretCode !== "NDESO2026") {
-      return res.status(403).json({ message: "Kode registrasi tidak valid!" });
-    }
+app.use(
+  cors({
+    origin: "*",
+    credentials: true,
+  }),
+);
 
-    // 1. Cek apakah username sudah digunakan
-    const existingAdmin = await Admin.findOne({ username });
-    if (existingAdmin) {
-      return res.status(400).json({ message: "Username sudah terdaftar" });
-    }
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-    // 2. Hash password menggunakan bcrypt
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // 3. Simpan admin baru ke database
-    const newAdmin = new Admin({
-      username,
-      password: hashedPassword,
-      role: "admin" // Default sebagai admin
-    });
-
-    await newAdmin.save();
-
-    res.status(201).json({ 
-      success: true, 
-      message: "Admin berhasil didaftarkan!" 
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Gagal melakukan registrasi" });
-  }
-});
-
-app.post("/api/login", async (req, res) => {
-  const { username, password } = req.body;
-
-  try {
-    const admin = await Admin.findOne({ username });
-    if (!admin) {
-      return res.status(401).json({ message: "Username tidak ditemukan" });
-    }
-
-    // Menggunakan Bcrypt (Sangat disarankan untuk skripsi)
-    // Jika data di DB masih plain text, ganti sementara ke: const isMatch = (password === admin.password);
-    const isMatch = await bcrypt.compare(password, admin.password);
-
-    if (!isMatch) {
-      return res.status(401).json({ message: "Password salah" });
-    }
-
-    const token = jwt.sign(
-      { id: admin._id, role: admin.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
-    res.json({ success: true, token });
-  } catch (err) {
-    console.error("Login Error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-// ================= BUSINESS ROUTES =================
+// ================= ROUTES =================
 
 app.use("/scan", require("./routes/scan"));
 
-// Inject IO ke dalam apiRoutes
 const apiRoutes = require("./routes/api")(io);
 app.use("/api", apiRoutes);
 
 // ================= STATIC FILES =================
 
 const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
 
-app.use("/uploads", express.static(uploadDir, {
-  maxAge: "7d",
-  etag: true,
-  immutable: true,
-}));
+app.use(
+  "/uploads",
+  express.static(uploadDir, {
+    maxAge: "7d",
+    etag: true,
+    immutable: true,
+  }),
+);
 
-// ================= DATABASE CONNECTION =================
+// ================= DATABASE =================
 
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => console.log(" Connected to MongoDB Atlas"))
-  .catch((err) => console.error(" MongoDB Connection Error:", err));
+if (DB_URI) {
+  mongoose
+    .connect(DB_URI)
+    .then(() => console.log("Connected to MongoDB Atlas"))
+    .catch((err) => console.error("MongoDB Connection Error:", err));
+}
 
 // ================= SOCKET LOGIC =================
 
-// Di server.js, perbaiki bagian socket logic
-
-const tableLocks = {}; // Format: { tableId: { clientId, lastSeen } }
+const tableLocks = {};
 
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
+  /* ================= JOIN TABLE ================= */
+  socket.on("joinTable", (tableNumber) => {
+    socket.join(`table-${tableNumber}`);
+    console.log(`Socket ${socket.id} joined table-${tableNumber}`);
+  });
+
+  socket.on("leaveTable", (tableNumber) => {
+    socket.leave(`table-${tableNumber}`);
+    console.log(`Socket ${socket.id} left table-${tableNumber}`);
+  });
+
   /* ================= TABLE LOCK ================= */
   socket.on("tryAccessTable", ({ tableId, clientId }) => {
-    // LOCK PER MEJA, BUKAN GLOBAL
     const lock = tableLocks[tableId];
 
-    if (lock) {
-      // Cek apakah lock expired (lebih dari 10 detik tidak ada heartbeat)
+    if (lock && lock.clientId !== clientId) {
       const expired = Date.now() - lock.lastSeen > 10000;
-      
-      if (!expired && lock.clientId !== clientId) {
-        // Lock masih aktif dan client berbeda
+      if (!expired) {
         return socket.emit("accessDenied", {
-          message: `Meja ${tableId} sedang digunakan di perangkat lain`,
+          message: "Meja sedang digunakan",
         });
-      }
-      
-      if (expired) {
-        // Lock expired, hapus dan beri akses ke client baru
-        console.log(`Lock for table ${tableId} expired, granting access to new client`);
-        delete tableLocks[tableId];
       }
     }
 
-    // Beri akses ke meja ini
     tableLocks[tableId] = {
       clientId,
       lastSeen: Date.now(),
     };
 
     socket.join(`table-${tableId}`);
-    socket.emit("accessGranted", { 
-      message: `Akses diberikan untuk meja ${tableId}` 
-    });
-    
-    console.log(`Client ${clientId} granted access to table ${tableId}`);
+    socket.emit("accessGranted");
   });
 
   socket.on("heartbeat", ({ tableId, clientId }) => {
-    // Update lastSeen hanya jika client yang sama masih memegang lock
     if (tableLocks[tableId]?.clientId === clientId) {
       tableLocks[tableId].lastSeen = Date.now();
     }
@@ -201,29 +135,10 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
-    
-    // Optional: Hapus lock ketika client disconnect
-    // Tapi hati-hati, bisa menyebabkan masalah jika ingin pindah meja
-    for (const tableId in tableLocks) {
-      // Cari clientId berdasarkan socket? Ini agak rumit
-      // Lebih baik biarkan heartbeat yang handle
-    }
   });
 });
 
-
-app.post("/api/reset-table-lock/:tableNumber", (req, res) => {
-  const tableNumber = req.params.tableNumber;
-  
-  if (tableLocks[tableNumber]) {
-    delete tableLocks[tableNumber];
-    res.json({ success: true, message: `Lock untuk meja ${tableNumber} telah direset` });
-  } else {
-    res.json({ success: true, message: `Tidak ada lock untuk meja ${tableNumber}` });
-  }
-});
-
-// ================= UTIL & TEST =================
+// ================= UTIL =================
 
 app.get("/test-token/:table", (req, res) => {
   const token = generateOrderToken(req.params.table);
@@ -232,6 +147,6 @@ app.get("/test-token/:table", (req, res) => {
 
 // ================= SERVER START =================
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
 });

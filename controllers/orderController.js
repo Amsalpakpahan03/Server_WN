@@ -1,36 +1,100 @@
+// controllers/OrderController.js
 const Order = require("../models/Order");
-const orderService = require("../services/OrderService"); // TAMBAHKAN INI
+const orderService = require("../services/OrderService");
 
-const getTableFromReq = (req) => req.tableNumber;
+const getTableFromReq = (req) => {
+  return req.body.tableNumber || req.query.tableNumber || req.headers['x-table-number'] || req.tableNumber;
+};
 
 // ================= CREATE ORDER =================
 exports.createOrder = (io) => async (req, res) => {
+  console.log("\n========== [CONTROLLER] CREATE ORDER ==========");
+  console.log("[CONTROLLER] Body:", JSON.stringify(req.body, null, 2));
+  console.log("[CONTROLLER] Headers:", req.headers.authorization);
+  
   try {
     const tableNumber = getTableFromReq(req);
+    console.log("[CONTROLLER] Table number:", tableNumber);
+    
+    if (!tableNumber) {
+      console.log("[CONTROLLER] ❌ No table number");
+      return res.status(400).json({ 
+        success: false,
+        message: "Table number is required" 
+      });
+    }
 
+    // Validasi items
+    if (!req.body.items || !Array.isArray(req.body.items) || req.body.items.length === 0) {
+      console.log("[CONTROLLER] ❌ No items");
+      return res.status(400).json({ 
+        success: false,
+        message: "Items are required and must be a non-empty array" 
+      });
+    }
+
+    console.log("[CONTROLLER] ✅ Calling service...");
     const savedOrder = await orderService.createOrder({
       tableNumber,
       items: req.body.items,
-      totalPrice: req.body.totalPrice,
+      totalPrice: req.body.totalPrice || 0,
     });
 
-    // Emit event ke semua client yang terhubung
+    console.log("[CONTROLLER] ✅ Order saved:", savedOrder._id);
+    
     io.emit("newOrder", savedOrder);
 
-    res.status(201).json(savedOrder);
+    res.status(201).json({
+      success: true,
+      data: savedOrder,
+      message: "Order created successfully"
+    });
   } catch (err) {
+    console.error("[CONTROLLER] ❌ ERROR:", err.message);
+    console.error("[CONTROLLER] Stack:", err.stack);
+    
     if (err.message === "TABLE_INVALID") {
-      return res.status(400).json({ message: "Table tidak valid" });
+      return res.status(400).json({ 
+        success: false,
+        message: "Table tidak valid" 
+      });
+    }
+    
+    if (err.message === "TABLE_OCCUPIED") {
+      return res.status(409).json({ 
+        success: false,
+        message: "Meja sedang digunakan, selesaikan pesanan terlebih dahulu" 
+      });
+    }
+    
+    if (err.message === "ITEMS_REQUIRED") {
+      return res.status(400).json({ 
+        success: false,
+        message: "Items wajib diisi" 
+      });
     }
 
-    res.status(500).json({ message: "Gagal membuat order", error: err });
+    if (err.name === "ValidationError") {
+      return res.status(400).json({ 
+        success: false,
+        message: "Data tidak valid",
+        details: err.message 
+      });
+    }
+
+    res.status(500).json({ 
+      success: false,
+      message: "Gagal membuat order", 
+      error: err.message,
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+    });
   }
 };
 
 // ================= GET ALL ORDERS =================
 exports.getAllOrders = async (req, res) => {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 });
+    const orders = await orderService.getAllOrders();
     res.json({
       success: true,
       data: orders,
@@ -48,7 +112,7 @@ exports.getAllOrders = async (req, res) => {
 // ================= GET ORDER BY ID =================
 exports.getOrderById = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const order = await orderService.getOrderById(req.params.id);
 
     if (!order) {
       return res.status(404).json({
@@ -74,10 +138,17 @@ exports.getOrderById = async (req, res) => {
 // ================= UPDATE STATUS GLOBAL =================
 exports.updateStatus = (io) => async (req, res) => {
   try {
-    const order = await orderService.updateStatus(
-      req.params.id,
-      req.body.status
-    );
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    const order = await orderService.updateStatus(id, status);
 
     if (!order) {
       return res.status(404).json({
@@ -86,7 +157,6 @@ exports.updateStatus = (io) => async (req, res) => {
       });
     }
 
-    // Emit event ke semua client
     io.emit("orderStatusUpdated", order);
 
     res.json({
@@ -104,17 +174,14 @@ exports.updateStatus = (io) => async (req, res) => {
   }
 };
 
-// ================= UPDATE STATUS PER KATEGORI (UNTUK MINUMAN) =================
+// ================= UPDATE STATUS PER KATEGORI =================
 exports.updateCategoryStatus = (io) => async (req, res) => {
   try {
     const { id } = req.params;
     const { category, status } = req.body;
 
-    console.log(
-      `[UPDATE CATEGORY] Order: ${id}, Category: ${category}, Status: ${status}`,
-    );
+    console.log(`[UPDATE CATEGORY] Order: ${id}, Category: ${category}, Status: ${status}`);
 
-    // Validasi category
     const validCategories = ["Makanan", "Minuman", "Cemilan", "Paket"];
     if (!validCategories.includes(category)) {
       return res.status(400).json({
@@ -123,7 +190,6 @@ exports.updateCategoryStatus = (io) => async (req, res) => {
       });
     }
 
-    // Validasi status
     const validStatus = ["pending", "cooking", "served"];
     if (!validStatus.includes(status)) {
       return res.status(400).json({
@@ -132,8 +198,7 @@ exports.updateCategoryStatus = (io) => async (req, res) => {
       });
     }
 
-    // Ambil order dari database
-    const order = await Order.findById(id);
+    const order = await orderService.updateCategoryStatus(id, category, status);
 
     if (!order) {
       return res.status(404).json({
@@ -142,50 +207,11 @@ exports.updateCategoryStatus = (io) => async (req, res) => {
       });
     }
 
-    // Update status untuk semua item dengan kategori tertentu
-    let updated = false;
-    let updatedCount = 0;
-
-    order.items = order.items.map((item) => {
-      if (item.category === category && item.status !== "served") {
-        updated = true;
-        updatedCount++;
-        return { ...item, status: status };
-      }
-      return item;
-    });
-
-    if (!updated) {
-      return res.status(400).json({
-        success: false,
-        message: `Tidak ada item dengan kategori ${category} yang perlu diupdate`,
-      });
-    }
-
-    // Cek apakah semua item sudah served
-    const allItemsServed = order.items.every(
-      (item) => item.status === "served",
-    );
-
-    // Update status global order jika semua item sudah served
-    if (allItemsServed && order.status !== "served") {
-      order.status = "served";
-      console.log(
-        `[UPDATE CATEGORY] All items served, updating global status to served`,
-      );
-    }
-
-    // Simpan perubahan
-    await order.save();
-
-    console.log(`[UPDATE CATEGORY] Successfully updated ${updatedCount} items`);
-
-    // Emit event ke semua client
     io.emit("orderStatusUpdated", order);
 
     res.json({
       success: true,
-      message: `${updatedCount} item dengan kategori ${category} berhasil diupdate menjadi ${status}`,
+      message: `Item dengan kategori ${category} berhasil diupdate menjadi ${status}`,
       data: order,
     });
   } catch (err) {
@@ -198,13 +224,19 @@ exports.updateCategoryStatus = (io) => async (req, res) => {
   }
 };
 
-// ================= UPDATE STATUS PER ITEM (INDIVIDUAL) =================
+// ================= UPDATE STATUS PER ITEM =================
 exports.updateItemStatus = (io) => async (req, res) => {
   try {
     const { id } = req.params;
     const { itemIndex, status } = req.body;
 
-    // Validasi status
+    if (itemIndex === undefined || !status) {
+      return res.status(400).json({
+        success: false,
+        message: "itemIndex dan status required",
+      });
+    }
+
     const validStatus = ["pending", "cooking", "served"];
     if (!validStatus.includes(status)) {
       return res.status(400).json({
@@ -213,8 +245,8 @@ exports.updateItemStatus = (io) => async (req, res) => {
       });
     }
 
-    // Ambil order dari database
-    const order = await Order.findById(id);
+    const order = await orderService.updateItemStatus(id, itemIndex, status);
+
     if (!order) {
       return res.status(404).json({
         success: false,
@@ -222,31 +254,6 @@ exports.updateItemStatus = (io) => async (req, res) => {
       });
     }
 
-    // Validasi index item
-    if (itemIndex < 0 || itemIndex >= order.items.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Index item tidak valid",
-      });
-    }
-
-    // Update status item
-    order.items[itemIndex].status = status;
-
-    // Cek apakah semua item sudah served
-    const allItemsServed = order.items.every(
-      (item) => item.status === "served",
-    );
-
-    // Update status global order jika semua item sudah served
-    if (allItemsServed && order.status !== "served") {
-      order.status = "served";
-    }
-
-    // Simpan perubahan
-    await order.save();
-
-    // Emit event ke semua client
     io.emit("orderStatusUpdated", order);
 
     res.json({
