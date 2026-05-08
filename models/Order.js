@@ -32,6 +32,19 @@ const OrderSchema = new mongoose.Schema(
           enum: ["pending", "cooking", "served"],
           default: "pending",
         },
+        // FIELD BARU UNTUK PAKET INCLUDE MINUMAN
+        isIncludedInPackage: {
+          type: Boolean,
+          default: false,
+        },
+        parentPackageName: {
+          type: String,
+          default: "",
+        },
+        isPackage: {
+          type: Boolean,
+          default: false,
+        },
       },
     ],
 
