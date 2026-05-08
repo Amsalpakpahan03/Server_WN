@@ -27,16 +27,10 @@ if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is missing in .env");
 
 // ================= CORS CONFIGURATION (DIPERBAIKI) =================
 
-// Izinkan semua origin yang diperlukan
-const allowedOrigins = [
+// Izinkan semua origin yang diperlukan dari environment variable
+const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) : [
   "http://localhost:3000",
-  "http://localhost:55923",
-  "http://127.0.0.1:55923",
-  "https://d4aa1b22-168c-44e1-a9a4-b990fed0bf50-00-2u5l4uo2l2hlm.sisko.replit.dev",
-  "https://client-wn.vercel.app",
-  "https://client-wn-2zo3.vercel.app",
-  "https://client-wn-zeta.vercel.app",
-  /\.vercel\.app$/, // Semua subdomain vercel
+  "https://client-wn.vercel.app"
 ];
 
 // CORS middleware yang lebih fleksibel
@@ -325,8 +319,7 @@ app.get("/api/migrate-images", async (req, res) => {
 
     console.log(`Found ${menus.length} images to migrate`);
 
-    const BASE_URL =
-      "https://ffba1d81-e43e-4366-a64e-7c28def97c1f-00-1lrc6qdsg3bwb.pike.replit.dev";
+    const BASE_URL = process.env.BASE_URL || "https://103.123.19.59.nip.io";
     let updated = 0;
 
     for (const menu of menus) {
@@ -374,8 +367,7 @@ app.get("/api/fix-localhost-images", async (req, res) => {
             $replaceOne: {
               input: "$image_url",
               find: "http://localhost:5000",
-              replacement:
-                "https://ffba1d81-e43e-4366-a64e-7c28def97c1f-00-1lrc6qdsg3bwb.pike.replit.dev",
+              replacement: process.env.BASE_URL || "https://103.123.19.59.nip.io",
             },
           },
         },
@@ -404,7 +396,7 @@ app.get("/api/fix-mixed-content", async (req, res) => {
     for (const menu of menus) {
       const newUrl = menu.image_url.replace(
         "http://localhost:5000",
-        "https://ffba1d81-e43e-4366-a64e-7c28def97c1f-00-1lrc6qdsg3bwb.pike.replit.dev",
+        process.env.BASE_URL || "https://103.123.19.59.nip.io",
       );
       menu.image_url = newUrl;
       await menu.save();
@@ -598,7 +590,7 @@ app.get("/api/copy-old-images", async (req, res) => {
 // ================= SERVER START =================
 
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📍 CORS enabled for Vercel deployments`);
-  console.log(`✅ Allowed origins: ${allowedOrigins.join(", ")}`);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`CORS enabled for Vercel deployments`);
+  console.log(`Allowed origins: ${allowedOrigins.join(", ")}`);
 });
