@@ -10,82 +10,106 @@ const expandPackageItems = async (items) => {
 
   for (const item of items) {
     console.log(
-      `[EXPAND] Processing item: ${item.name}, category: ${item.category}`,
+      `[EXPAND] Processing item: ${item.name || item.productId}, category: ${item.category}`,
     );
 
-    // Cari menu item dari database berdasarkan nama
-    const menuItem = await Menu.findOne({ name: item.name });
+    let menuItem = null;
 
-    if (
+    if (item.productId) {
+      try {
+        menuItem = await Menu.findById(item.productId);
+      } catch (err) {
+        console.warn(
+          `[EXPAND] productId invalid atau tidak ditemukan: ${item.productId}`,
+        );
+      }
+    }
+
+    if (!menuItem && item.name) {
+      menuItem = await Menu.findOne({ name: item.name });
+    }
+
+    const isPackageWithDrinks =
       menuItem &&
       menuItem.category === "Paket" &&
-      menuItem.includesDrinks === true
-    ) {
+      menuItem.includesDrinks === true;
+
+    if (isPackageWithDrinks) {
       console.log(
-        `[EXPAND] Paket ditemukan: ${item.name}, include drinks: true`,
+        `[EXPAND] Paket ditemukan: ${menuItem.name}, include drinks: true`,
       );
 
-      // 1. Tambahkan item paket itu sendiri
-      expandedItems.push({
-        name: item.name,
-        description: item.description || "",
-        quantity: item.quantity,
-        price: item.price,
+      const packageItem = {
+        productId: String(menuItem._id),
+        name: menuItem.name,
+        description: item.description || menuItem.description || "",
+        quantity: item.quantity || 1,
+        price: item.price != null ? item.price : menuItem.price,
         category: "Paket",
         status: "pending",
         isPackage: true,
-      });
+        includesDrinks: true,
+        includedDrinkIds: menuItem.includedDrinkIds || [],
+      };
 
-      // 2. Tambahkan minuman untuk setiap quantity paket
-      if (menuItem.includedDrinkIds && menuItem.includedDrinkIds.length > 0) {
-        // Ambil data minuman berdasarkan ID
-        const drinks = await Menu.find({
-          _id: { $in: menuItem.includedDrinkIds },
-        });
-        console.log(`[EXPAND] Menemukan ${drinks.length} minuman untuk paket`);
+      expandedItems.push(packageItem);
 
-        for (let i = 0; i < item.quantity; i++) {
+      const drinks =
+        menuItem.includedDrinkIds && menuItem.includedDrinkIds.length > 0
+          ? await Menu.find({ _id: { $in: menuItem.includedDrinkIds } })
+          : [];
+
+      console.log(
+        `[EXPAND] Menemukan ${drinks.length} minuman untuk paket ${menuItem.name}`,
+      );
+
+      if (drinks.length > 0) {
+        for (let i = 0; i < packageItem.quantity; i++) {
           for (const drink of drinks) {
             expandedItems.push({
+              productId: String(drink._id),
               name: drink.name,
-              description: `Minuman gratis dari paket ${item.name}`,
+              description: `Minuman gratis dari paket ${packageItem.name}`,
               quantity: 1,
               price: 0,
               category: "Minuman",
               status: "pending",
               isIncludedInPackage: true,
-              parentPackageName: item.name,
+              parentPackageId: packageItem.productId,
+              parentPackageName: packageItem.name,
             });
-            console.log(`[EXPAND] Menambahkan minuman: ${drink.name} (gratis)`);
+            console.log(
+              `[EXPAND] Menambahkan minuman: ${drink.name} (gratis)`,
+            );
           }
         }
       } else {
-        // Jika tidak ada minuman spesifik, tambahkan minuman default
-        console.log(
-          `[EXPAND] Tidak ada minuman spesifik, tambahkan minuman default`,
-        );
-        for (let i = 0; i < item.quantity; i++) {
+        for (let i = 0; i < packageItem.quantity; i++) {
           expandedItems.push({
-            name: `Minuman (${item.name})`,
-            description: `Minuman yang termasuk dalam paket ${item.name}`,
+            productId: item.productId || null,
+            name: `Minuman (${packageItem.name})`,
+            description: `Minuman gratis dari paket ${packageItem.name}`,
             quantity: 1,
             price: 0,
             category: "Minuman",
             status: "pending",
             isIncludedInPackage: true,
-            parentPackageName: item.name,
+            parentPackageId: packageItem.productId,
+            parentPackageName: packageItem.name,
           });
         }
       }
     } else {
-      // Bukan paket dengan include drinks, tambahkan biasa
-      console.log(`[EXPAND] Item biasa: ${item.name}`);
+      console.log(
+        `[EXPAND] Item biasa: ${item.name || item.productId}`,
+      );
       expandedItems.push({
-        name: item.name,
-        description: item.description || "",
-        quantity: item.quantity,
-        price: item.price,
-        category: item.category,
+        productId: item.productId || (menuItem ? String(menuItem._id) : null),
+        name: item.name || (menuItem ? menuItem.name : ""),
+        description: item.description || (menuItem ? menuItem.description : ""),
+        quantity: item.quantity || 1,
+        price: item.price != null ? item.price : (menuItem ? menuItem.price : 0),
+        category: item.category || (menuItem ? menuItem.category : ""),
         status: "pending",
       });
     }
