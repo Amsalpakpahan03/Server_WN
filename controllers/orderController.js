@@ -2,8 +2,22 @@ const Order = require("../models/Order");
 const Menu = require("../models/Menu");
 const orderService = require("../services/OrderService");
 
-const getTableFromReq = (req) => req.tableNumber;
-
+const getTableFromReq = (req) => {
+  // Coba dari body dulu
+  if (req.body && req.body.tableNumber) {
+    return req.body.tableNumber;
+  }
+  // Coba dari query params
+  if (req.query && req.query.table) {
+    return req.query.table;
+  }
+  // Coba dari params
+  if (req.params && req.params.tableNumber) {
+    return req.params.tableNumber;
+  }
+  // Fallback ke property lama
+  return req.tableNumber;
+};
 // ================= FUNGSI UNTUK EXPAND PAKET =================
 const expandPackageItems = async (items) => {
   const expandedItems = [];
@@ -115,42 +129,44 @@ const expandPackageItems = async (items) => {
 // ================= CREATE ORDER =================
 exports.createOrder = (io) => async (req, res) => {
   try {
+    console.log("[CREATE ORDER] ========== START ==========");
+    console.log("[CREATE ORDER] Full req.body:", JSON.stringify(req.body, null, 2));
+    
     const tableNumber = getTableFromReq(req);
-
-    console.log("[CREATE ORDER] Request body:", JSON.stringify(req.body, null, 2));
-
-    // EXPAND PAKET
+    
+    console.log("[CREATE ORDER] tableNumber from getTableFromReq:", tableNumber);
+    
+    if (!tableNumber) {
+      console.log("[CREATE ORDER] ❌ No tableNumber!");
+      return res.status(400).json({ message: "Table tidak valid" });
+    }
+    
     const expandedItems = await expandPackageItems(req.body.items);
-
-    console.log("[CREATE ORDER] Items setelah expand:", JSON.stringify(expandedItems, null, 2));
-
-    // Hitung total price (minuman gratis tidak dihitung)
+    
     const totalPrice = expandedItems.reduce((sum, item) => {
       if (!item.isIncludedInPackage) {
         return sum + (item.price || 0) * (item.quantity || 1);
       }
       return sum;
     }, 0);
-
+    
+    console.log("[CREATE ORDER] Calling orderService with tableNumber:", tableNumber);
+    
     const savedOrder = await orderService.createOrder({
-      tableNumber,
+      tableNumber: String(tableNumber),
       items: expandedItems,
       totalPrice,
     });
-
-    console.log(`[CREATE ORDER] Order berhasil dibuat dengan ${expandedItems.length} items`);
-
+    
+    console.log("[CREATE ORDER] ✅ Success!");
+    
     io.emit("newOrder", savedOrder);
     res.status(201).json(savedOrder);
   } catch (err) {
     console.error("[CREATE ORDER] Error:", err);
-    if (err.message === "TABLE_INVALID") {
-      return res.status(400).json({ message: "Table tidak valid" });
-    }
     res.status(500).json({ message: "Gagal membuat order", error: err.message });
   }
 };
-
 // ================= GET ALL ORDERS =================
 exports.getAllOrders = async (req, res) => {
   try {
