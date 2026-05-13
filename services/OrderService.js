@@ -18,7 +18,10 @@ exports.createOrder = async ({ tableNumber, items, totalPrice }) => {
     const item = items[i];
     if (!item.name) throw new Error(`Item ${i}: name required`);
     if (!item.quantity) throw new Error(`Item ${i}: quantity required`);
-    if (!item.price) throw new Error(`Item ${i}: price required`);
+    // Price boleh 0 (untuk minuman gratis)
+if (item.price === undefined || item.price === null) {
+  throw new Error(`Item ${i}: price required`);
+}
     if (!item.category) throw new Error(`Item ${i}: category required`);
   }
 
