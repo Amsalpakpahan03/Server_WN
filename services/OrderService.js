@@ -1,8 +1,30 @@
 // services/OrderService.js
 const Order = require("../models/Order");
 
-exports.createOrder = async ({ tableNumber, items, totalPrice }) => {
-  console.log("[SERVICE] Creating order with:", { tableNumber, itemsCount: items?.length, totalPrice });
+const validOrderStatuses = ["pending", "cooking", "served", "paid"];
+
+const normalizeItem = (item, index) => {
+  if (!item.name) throw new Error(`Item ${index}: name required`);
+  if (!item.quantity) throw new Error(`Item ${index}: quantity required`);
+  if (item.price === undefined || item.price === null) {
+    throw new Error(`Item ${index}: price required`);
+  }
+  if (!item.category) throw new Error(`Item ${index}: category required`);
+
+  return {
+    name: item.name,
+    quantity: Number(item.quantity),
+    price: Number(item.price),
+    category: item.category,
+    status: item.status || "pending",
+    isIncludedInPackage: item.isIncludedInPackage || false,
+    parentPackageName: item.parentPackageName || "",
+    isPackage: item.isPackage || false,
+  };
+};
+
+exports.createOrder = async ({ tableNumber, items, totalPrice, notes, status }) => {
+  console.log("[SERVICE] Creating order with:", { tableNumber, itemsCount: items?.length, totalPrice, notes });
   
   if (!tableNumber) {
     throw new Error("TABLE_INVALID");
@@ -38,15 +60,10 @@ if (item.price === undefined || item.price === null) {
 
   const orderData = {
     tableNumber: tableNumber.toString(),
-    items: items.map(item => ({
-      name: item.name,
-      quantity: Number(item.quantity),
-      price: Number(item.price),
-      category: item.category,
-      status: item.status || "pending"
-    })),
+    items: items.map((item, index) => normalizeItem(item, index)),
     totalPrice: Number(totalPrice) || 0,
-    status: "pending",
+    notes: typeof notes === "string" ? notes.trim() : "",
+    status: validOrderStatuses.includes(status) ? status : "pending",
   };
 
   console.log("[SERVICE] Order data prepared:", JSON.stringify(orderData, null, 2));
@@ -67,6 +84,59 @@ exports.getAllOrders = async () => {
 exports.getOrderById = async (id) => {
   if (!id) return null;
   return await Order.findById(id);
+};
+
+exports.getOrdersPage = async (page = 1, limit = 20) => {
+  const skip = (page - 1) * limit;
+  const [data, total] = await Promise.all([
+    Order.find()
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit),
+    Order.countDocuments(),
+  ]);
+  return {
+    data,
+    page,
+    limit,
+    total,
+    pages: Math.ceil(total / limit),
+  };
+};
+
+exports.updateOrder = async (id, { items, status, notes, totalPrice }) => {
+  const order = await Order.findById(id);
+  if (!order) {
+    throw new Error("ORDER_NOT_FOUND");
+  }
+
+  if (items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error("ITEMS_REQUIRED");
+    }
+
+    order.items = items.map((item, index) => normalizeItem(item, index));
+
+    if (totalPrice !== undefined) {
+      order.totalPrice = Number(totalPrice);
+    } else {
+      order.totalPrice = order.items.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
+    }
+  }
+
+  if (status) {
+    if (!validOrderStatuses.includes(status)) {
+      throw new Error("INVALID_STATUS");
+    }
+    order.status = status;
+  }
+
+  if (typeof notes === "string") {
+    order.notes = notes.trim();
+  }
+
+  await order.save();
+  return order;
 };
 
 // ================= UPDATE STATUS =================

@@ -587,6 +587,38 @@ app.get("/api/copy-old-images", async (req, res) => {
   });
 });
 
+app.get("/api/check-menu-images", async (req, res) => {
+  const Menu = require("./models/Menu");
+  try {
+    const menus = await Menu.find({}, "name image_url price category");
+    res.json({
+      total: menus.length,
+      menus: menus.map(m => ({
+        name: m.name,
+        image_url: m.image_url || "(kosong)",
+        hasImage: !!m.image_url && m.image_url !== "no-image.png"
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// Tambahkan di server.js
+app.get("/api/list-uploaded-files", (req, res) => {
+  const fs = require("fs");
+  const path = require("path");
+  const uploadDir = path.join(__dirname, "uploads");
+  
+  fs.readdir(uploadDir, (err, files) => {
+    if (err) {
+      return res.json({ error: err.message });
+    }
+    res.json({
+      total: files.length,
+      files: files.filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f))
+    });
+  });
+});
 // ================= SERVER START =================
 
 server.listen(PORT, () => {

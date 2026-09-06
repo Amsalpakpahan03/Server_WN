@@ -36,6 +36,36 @@ const MenuSchema = new mongoose.Schema(
       default: true,
     },
 
+    hasTemperature: {
+      type: Boolean,
+      default: false,
+    },
+    extraPriceForIce: {
+      type: Number,
+      default: 1000,
+      min: 0,
+    },
+
+    hasVariants: {
+      type: Boolean,
+      default: false,
+    },
+    variants: [
+      {
+        name: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        extraPrice: {
+          type: Number,
+          required: true,
+          default: 0,
+          min: 0,
+        },
+      },
+    ],
+
     // FIELD BARU UNTUK PAKET
     includesDrinks: {
       type: Boolean,
@@ -49,6 +79,24 @@ const MenuSchema = new mongoose.Schema(
         ref: "Menu",
       },
     ],
+
+    // SOFT DELETE FIELDS
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // Untuk tracking data asli
+    originalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
   },
   { timestamps: true },
 );

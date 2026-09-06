@@ -6,14 +6,41 @@ exports.getAllMenu = async () => {
 
 exports.createMenu = async (data, compressedImage) => {
   try {
+    const parseBoolean = (value) => value === true || value === "true" || value === "1";
+    const parseVariants = (value) => {
+      if (!value) return [];
+      if (Array.isArray(value)) return value;
+
+      try {
+        return JSON.parse(value);
+      } catch (err) {
+        console.error("Failed to parse variants:", err);
+        return [];
+      }
+    };
+
     const menuData = {
       name: data.name,
       category: data.category,
-      price: data.price,
+      price: Number(data.price) || 0,
       description: data.description || "",
       image_url: compressedImage || null,
       isAvailable: true,
+      hasTemperature: parseBoolean(data.hasTemperature),
+      extraPriceForIce: Number(data.extraPriceForIce) || 1000,
+      hasVariants: parseBoolean(data.hasVariants),
+      variants: parseVariants(data.variants),
     };
+
+    if (menuData.category !== "Minuman") {
+      menuData.hasTemperature = false;
+      menuData.extraPriceForIce = 0;
+    }
+
+    if (menuData.category !== "Makanan") {
+      menuData.hasVariants = false;
+      menuData.variants = [];
+    }
 
     // Jika paket dan include drinks
     if (data.category === "Paket" && data.includesDrinks === "true") {

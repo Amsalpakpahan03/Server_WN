@@ -2,22 +2,24 @@ const Order = require("../models/Order");
 const Menu = require("../models/Menu");
 const orderService = require("../services/OrderService");
 
+// ================= FUNGSI GET TABLE NUMBER =================
 const getTableFromReq = (req) => {
-  // Coba dari body dulu
+  // Coba dari body dulu (POST request)
   if (req.body && req.body.tableNumber) {
     return req.body.tableNumber;
   }
-  // Coba dari query params
+  // Coba dari query params (GET request)
   if (req.query && req.query.table) {
     return req.query.table;
   }
-  // Coba dari params
+  // Coba dari URL params
   if (req.params && req.params.tableNumber) {
     return req.params.tableNumber;
   }
   // Fallback ke property lama
   return req.tableNumber;
 };
+
 // ================= FUNGSI UNTUK EXPAND PAKET =================
 const expandPackageItems = async (items) => {
   const expandedItems = [];
@@ -25,7 +27,7 @@ const expandPackageItems = async (items) => {
   for (const item of items) {
     console.log(`[EXPAND] Processing item: ${item.name} | productId: ${item.productId}`);
 
-    // 🔥 SKIP jika ini sudah minuman dari paket (dikirim dari frontend)
+    // SKIP jika ini sudah minuman dari paket (dikirim dari frontend)
     if (item.isIncludedInPackage === true) {
       console.log(`[EXPAND] SKIPPING - already expanded drink: ${item.name}`);
       expandedItems.push({
@@ -72,13 +74,13 @@ const expandPackageItems = async (items) => {
       continue;
     }
 
-    // 🔥 Jika PAKET dengan include drinks
+    // Jika PAKET dengan include drinks
     if (menuItem.category === "Paket" && menuItem.includesDrinks === true) {
-      console.log(`[EXPAND] PAKET with drinks: ${menuItem.name}`);
+      console.log(`[EXPAND] PAKET with drinks: ${item.name}`);
 
       // 1. Tambah paket utama
       expandedItems.push({
-        name: menuItem.name,
+        name: item.name,
         description: item.description || menuItem.description || "",
         quantity: item.quantity,
         price: item.price || menuItem.price,
@@ -110,9 +112,9 @@ const expandPackageItems = async (items) => {
       }
     } else {
       // Item biasa (bukan paket)
-      console.log(`[EXPAND] Regular item: ${menuItem.name}`);
+      console.log(`[EXPAND] Regular item: ${item.name}`);
       expandedItems.push({
-        name: menuItem.name,
+        name: item.name,
         description: item.description || menuItem.description || "",
         quantity: item.quantity,
         price: item.price || menuItem.price,
@@ -137,12 +139,16 @@ exports.createOrder = (io) => async (req, res) => {
     console.log("[CREATE ORDER] tableNumber from getTableFromReq:", tableNumber);
     
     if (!tableNumber) {
-      console.log("[CREATE ORDER] ❌ No tableNumber!");
+      console.log("[CREATE ORDER] ❌ No tableNumber found!");
       return res.status(400).json({ message: "Table tidak valid" });
     }
     
-    const expandedItems = await expandPackageItems(req.body.items);
+    // EXPAND PAKET
+    const expandedItems = await expandPackageItems(req.body.items || []);
     
+    console.log("[CREATE ORDER] Items setelah expand:", JSON.stringify(expandedItems, null, 2));
+    
+    // Hitung total price (minuman gratis tidak dihitung)
     const totalPrice = expandedItems.reduce((sum, item) => {
       if (!item.isIncludedInPackage) {
         return sum + (item.price || 0) * (item.quantity || 1);
@@ -150,23 +156,32 @@ exports.createOrder = (io) => async (req, res) => {
       return sum;
     }, 0);
     
+    const notes = typeof req.body.notes === "string" ? req.body.notes.trim() : "";
+
+    console.log("[CREATE ORDER] Total price:", totalPrice);
     console.log("[CREATE ORDER] Calling orderService with tableNumber:", tableNumber);
     
     const savedOrder = await orderService.createOrder({
       tableNumber: String(tableNumber),
       items: expandedItems,
       totalPrice,
+      notes,
     });
     
-    console.log("[CREATE ORDER] ✅ Success!");
+    console.log(`[CREATE ORDER] ✅ Order created successfully with ${expandedItems.length} items`);
     
     io.emit("newOrder", savedOrder);
     res.status(201).json(savedOrder);
+    
   } catch (err) {
-    console.error("[CREATE ORDER] Error:", err);
+    console.error("[CREATE ORDER] ❌ Error:", err);
+    if (err.message === "TABLE_INVALID") {
+      return res.status(400).json({ message: "Table tidak valid" });
+    }
     res.status(500).json({ message: "Gagal membuat order", error: err.message });
   }
 };
+
 // ================= GET ALL ORDERS =================
 exports.getAllOrders = async (req, res) => {
   try {
@@ -182,7 +197,9 @@ exports.getAllOrders = async (req, res) => {
 exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
-    if (!order) return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    }
     res.json({ success: true, data: order });
   } catch (err) {
     console.error("Error getOrderById:", err);
@@ -194,7 +211,9 @@ exports.getOrderById = async (req, res) => {
 exports.updateStatus = (io) => async (req, res) => {
   try {
     const order = await orderService.updateStatus(req.params.id, req.body.status);
-    if (!order) return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    }
     io.emit("orderStatusUpdated", order);
     res.json({ success: true, message: "Status pesanan berhasil diupdate", data: order });
   } catch (err) {
@@ -220,7 +239,9 @@ exports.updateCategoryStatus = (io) => async (req, res) => {
     }
 
     const order = await Order.findById(id);
-    if (!order) return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    }
 
     let updatedCount = 0;
     order.items = order.items.map((item) => {
@@ -232,7 +253,10 @@ exports.updateCategoryStatus = (io) => async (req, res) => {
     });
 
     if (updatedCount === 0) {
-      return res.status(400).json({ success: false, message: `Tidak ada item dengan kategori ${category} yang perlu diupdate` });
+      return res.status(400).json({ 
+        success: false, 
+        message: `Tidak ada item dengan kategori ${category} yang perlu diupdate` 
+      });
     }
 
     const allItemsServed = order.items.every((item) => item.status === "served");
@@ -242,7 +266,13 @@ exports.updateCategoryStatus = (io) => async (req, res) => {
 
     await order.save();
     io.emit("orderStatusUpdated", order);
-    res.json({ success: true, message: `${updatedCount} item dengan kategori ${category} berhasil diupdate menjadi ${status}`, data: order });
+    
+    res.json({ 
+      success: true, 
+      message: `${updatedCount} item dengan kategori ${category} berhasil diupdate menjadi ${status}`, 
+      data: order 
+    });
+    
   } catch (err) {
     console.error("Error updateCategoryStatus:", err);
     res.status(500).json({ success: false, message: "Gagal update status kategori", error: err.message });
@@ -253,10 +283,176 @@ exports.updateCategoryStatus = (io) => async (req, res) => {
 exports.deleteOrder = async (req, res) => {
   try {
     const order = await Order.findByIdAndDelete(req.params.id);
-    if (!order) return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    }
     res.json({ success: true, message: "Pesanan berhasil dihapus", data: order });
   } catch (err) {
     console.error("Error deleteOrder:", err);
     res.status(500).json({ success: false, message: "Gagal menghapus pesanan", error: err.message });
+  }
+};
+
+
+// ================= ADD ITEMS TO EXISTING ORDER =================
+exports.addItemsToOrder = (io) => async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { items } = req.body;
+
+    console.log("[ADD ITEMS] ========== START ==========");
+    console.log("[ADD ITEMS] Order ID:", id);
+    console.log("[ADD ITEMS] New items:", JSON.stringify(items, null, 2));
+
+    // Cari order yang sudah ada
+    const order = await Order.findById(id);
+    if (!order) {
+      console.log("[ADD ITEMS] ❌ Order not found");
+      return res.status(404).json({ success: false, message: "Order tidak ditemukan" });
+    }
+
+    // Cek apakah order sudah selesai (paid)
+    if (order.status === "paid") {
+      console.log("[ADD ITEMS] ❌ Order already paid");
+      return res.status(400).json({ 
+        success: false, 
+        message: "Pesanan sudah dibayar, tidak bisa menambah menu lagi" 
+      });
+    }
+
+    // EXPAND PAKET untuk item baru
+    const expandedNewItems = await expandPackageItems(items);
+    console.log("[ADD ITEMS] Expanded new items:", JSON.stringify(expandedNewItems, null, 2));
+
+    // Hitung total harga item baru (minuman gratis tidak dihitung)
+    const newItemsTotal = expandedNewItems.reduce((sum, item) => {
+      if (!item.isIncludedInPackage) {
+        return sum + (item.price || 0) * (item.quantity || 1);
+      }
+      return sum;
+    }, 0);
+
+    console.log("[ADD ITEMS] New items total price:", newItemsTotal);
+
+    const notes = typeof req.body.notes === "string" ? req.body.notes.trim() : undefined;
+
+    // Tambahkan item baru ke order yang sudah ada
+    order.items.push(...expandedNewItems);
+    order.totalPrice += newItemsTotal;
+
+    if (notes !== undefined) {
+      order.notes = notes;
+      console.log("[ADD ITEMS] Order notes updated");
+    }
+
+    // Update status global order jika perlu
+    // Jika order sebelumnya sudah served, reset ke cooking karena ada item baru
+    if (order.status === "served") {
+      order.status = "cooking";
+      console.log("[ADD ITEMS] Order status changed from served to cooking");
+    } else if (order.status !== "paid" && order.status !== "cooking") {
+      order.status = "pending";
+      console.log("[ADD ITEMS] Order status set to pending");
+    }
+
+    await order.save();
+    console.log("[ADD ITEMS] ✅ Items added successfully, new total price:", order.totalPrice);
+
+    const newItemNames = expandedNewItems.map((item) => item.name);
+    io.emit("orderItemsAdded", {
+      orderId: order._id,
+      tableNumber: order.tableNumber,
+      newItems: expandedNewItems,
+      totalAddedPrice: newItemsTotal,
+      newItemNames,
+    });
+
+    // Emit socket event untuk update real-time
+    io.emit("orderStatusUpdated", order);
+
+    // Emit khusus ke meja yang bersangkutan
+    io.to(`table_${order.tableNumber}`).emit("orderStatusUpdated", order);
+
+    res.json({ 
+      success: true, 
+      message: `${expandedNewItems.length} item berhasil ditambahkan ke pesanan`,
+      data: order 
+    });
+
+  } catch (err) {
+    console.error("[ADD ITEMS] ❌ Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Gagal menambahkan item ke pesanan", 
+      error: err.message 
+    });
+  }
+};
+
+// ================= ADMIN CREATE ORDER =================
+exports.createAdminOrder = (io) => async (req, res) => {
+  try {
+    const { tableNumber, items, status, notes } = req.body;
+    const expandedItems = await expandPackageItems(items || []);
+
+    const totalPrice = expandedItems.reduce((sum, item) => {
+      if (!item.isIncludedInPackage) {
+        return sum + (item.price || 0) * (item.quantity || 1);
+      }
+      return sum;
+    }, 0);
+
+    const savedOrder = await orderService.createOrder({
+      tableNumber: String(tableNumber),
+      items: expandedItems,
+      totalPrice,
+      notes,
+      status,
+    });
+
+    io.emit("newOrder", savedOrder);
+    res.status(201).json({ success: true, data: savedOrder });
+  } catch (err) {
+    console.error("[ADMIN CREATE ORDER] ❌ Error:", err);
+    res.status(500).json({ success: false, message: "Gagal membuat order manual", error: err.message });
+  }
+};
+
+// ================= ADMIN UPDATE ORDER =================
+exports.updateAdminOrder = (io) => async (req, res) => {
+  try {
+    const { items, status, notes, totalPrice } = req.body;
+    const orderId = req.params.id;
+    let expandedItems;
+
+    if (items) {
+      expandedItems = await expandPackageItems(items);
+    }
+
+    const updatedOrder = await orderService.updateOrder(orderId, {
+      items: expandedItems,
+      status,
+      notes,
+      totalPrice,
+    });
+
+    io.emit("orderStatusUpdated", updatedOrder);
+    res.json({ success: true, data: updatedOrder });
+  } catch (err) {
+    console.error("[ADMIN UPDATE ORDER] ❌ Error:", err);
+    res.status(500).json({ success: false, message: "Gagal mengedit order manual", error: err.message });
+  }
+};
+
+// ================= ADMIN GET ORDERS =================
+exports.getAdminOrders = async (req, res) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
+    const result = await orderService.getOrdersPage(page, limit);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error("[ADMIN GET ORDERS] ❌ Error:", err);
+    res.status(500).json({ success: false, message: "Gagal mengambil daftar order admin", error: err.message });
   }
 };

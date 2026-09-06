@@ -53,6 +53,12 @@ const OrderSchema = new mongoose.Schema(
       default: 0,
     },
 
+    notes: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+
     // Status global order (untuk keseluruhan pesanan)
     status: {
       type: String,
